@@ -40,6 +40,7 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
+  CREATE INDEX IF NOT EXISTS idx_messages_session_role_status ON messages(session_id, role, status);
   CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(last_active DESC);
   CREATE INDEX IF NOT EXISTS idx_tokens_user ON auth_tokens(user_id);
 
@@ -122,7 +123,11 @@ module.exports = {
     const row = db.prepare(
       'SELECT t.user_id, t.expires_at, u.id, u.email, u.username, u.display_name FROM auth_tokens t JOIN users u ON u.id = t.user_id WHERE t.token = ?'
     ).get(token);
-    if (!row || row.expires_at < Date.now()) return null;
+    if (!row) return null;
+    if (row.expires_at < Date.now()) {
+      this.deleteToken(token);
+      return null;
+    }
     return { id: row.id, email: row.email, username: row.username, display_name: row.display_name };
   },
 
@@ -208,6 +213,12 @@ module.exports = {
     return db.prepare(
       'SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC'
     ).all(sessionId);
+  },
+
+  getPendingUserMessageCountBySession(sessionId) {
+    return db.prepare(
+      "SELECT COUNT(*) as count FROM messages WHERE session_id = ? AND role = 'user' AND status = 'pending'"
+    ).get(sessionId).count;
   },
 
   updateMessageStatus(id, status) {

@@ -177,7 +177,7 @@ app.get('/api/admin/api-keys', requireAdmin, (req, res) => {
   res.json({ keys: store.getApiKeys() });
 });
 
-app.post('/api/admin/api-keys', (req, res) => {
+app.post('/api/admin/api-keys', requireAdmin, (req, res) => {
   const name = req.body.name?.trim();
   if (!name) return res.status(400).json({ error: '请输入密钥名称' });
 
@@ -301,6 +301,7 @@ app.get('/api/v1/messages', requireApiKey, (req, res) => {
   if (!owned) return res.status(403).json({ error: '无权访问该 session' });
 
   const all = store.getMessages(sessionId);
+  const pendingCount = store.getPendingUserMessageCountBySession(sessionId);
   const items = all.map(m => ({
     id: m.id,
     role: m.role,
@@ -309,7 +310,6 @@ app.get('/api/v1/messages', requireApiKey, (req, res) => {
     createdAt: m.created_at
   }));
 
-  const pendingCount = all.filter(m => m.role === 'user' && m.status === 'pending').length;
   res.json({
     sessionId,
     pending: pendingCount > 0,
