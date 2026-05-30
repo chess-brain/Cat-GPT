@@ -17,11 +17,22 @@ const replyInput = document.getElementById('replyInput');
 const replyBtn = document.getElementById('replyBtn');
 const simulateTyping = document.getElementById('simulateTyping');
 const typingDelay = document.getElementById('typingDelay');
+const deepThinkReplyToggle = document.getElementById('deepThinkReplyToggle');
+const webSearchReplyToggle = document.getElementById('webSearchReplyToggle');
+const deepThinkReplyInput = document.getElementById('deepThinkReplyInput');
+const webSearchReplyInput = document.getElementById('webSearchReplyInput');
 const adminUserName = document.getElementById('adminUserName');
 const adminLogoutBtn = document.getElementById('adminLogoutBtn');
 const apiKeyNameInput = document.getElementById('apiKeyNameInput');
 const createApiKeyBtn = document.getElementById('createApiKeyBtn');
 const apiKeyList = document.getElementById('apiKeyList');
+const analysisQueryInput = document.getElementById('analysisQueryInput');
+const analysisSearchBtn = document.getElementById('analysisSearchBtn');
+const analysisResults = document.getElementById('analysisResults');
+const analysisSource = document.getElementById('analysisSource');
+const analysisGoogleLink = document.getElementById('analysisGoogleLink');
+const analysisBingLink = document.getElementById('analysisBingLink');
+const analysisBaiduLink = document.getElementById('analysisBaiduLink');
 
 let currentSessionId = null;
 let sessions = [];
@@ -38,6 +49,138 @@ function adminHeaders() {
   };
 }
 
+function normalizeMessageText(value) {
+  if (typeof value !== 'string') return '';
+  return value
+    .replace(/\u00A0/g, ' ')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim();
+}
+
+function renderWithStructuredBlocks(text) {
+  const source = String(text || '');
+  const tokenMap = {};
+  let tokenIndex = 0;
+
+  const converted = source.replace(/\[(DEEP_THINK|WEB_SEARCH)\]\n?([\s\S]*?)\[\/\1\]/g, (_, type, body) => {
+    const token = `__BLOCK_TOKEN_${tokenIndex++}__`;
+    const blockTitle = type === 'DEEP_THINK' ? '深度思考' : '联网搜索';
+    const blockClass = type === 'DEEP_THINK' ? 'deep-think' : 'web-search';
+    tokenMap[token] = `
+      <div class="assistant-structured-block ${blockClass}">
+        <div class="assistant-structured-title">${blockTitle}</div>
+        <div class="assistant-structured-body">${renderMarkdown(body)}</div>
+      </div>
+    `;
+    return token;
+  });
+
+  let html = renderMarkdown(converted);
+  Object.entries(tokenMap).forEach(([token, blockHtml]) => {
+    html = html.replace(token, blockHtml);
+  });
+  return html;
+}
+
+function renderMarkdown(text) {
+  let html = escapeHtml(String(text || ''));
+  const codeBlocks = [];
+
+  html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+    const token = `__CODE_BLOCK_${codeBlocks.length}__`;
+    const className = lang ? ` class="language-${lang}"` : '';
+    codeBlocks.push(`<pre><code${className}>${code.trim()}</code></pre>`);
+    return token;
+  });
+
+  html = html.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  html = html.replace(/^\> (.+)$/gm, '<blockquote>$1</blockquote>');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+  html = html.replace(/(?:^|\n)([-*] .+(?:\n[-*] .+)*)/g, (match) => {
+    const items = match.trim().split('\n').map(line => `<li>${line.replace(/^[-*]\s+/, '')}</li>`).join('');
+    return `\n<ul>${items}</ul>`;
+  });
+
+  html = html.replace(/(?:^|\n)(\d+\. .+(?:\n\d+\. .+)*)/g, (match) => {
+    const items = match.trim().split('\n').map(line => `<li>${line.replace(/^\d+\.\s+/, '')}</li>`).join('');
+    return `\n<ol>${items}</ol>`;
+  });
+
+  const paragraphs = html.split(/\n{2,}/).map(block => {
+    const trimmed = block.trim();
+    if (!trimmed) return '';
+    if (/^<(h1|h2|h3|ul|ol|pre|blockquote|div)/.test(trimmed)) return trimmed;
+    return `<p>${trimmed.replace(/\n/g, '<br>')}</p>`;
+  });
+
+  html = paragraphs.filter(Boolean).join('');
+  codeBlocks.forEach((code, idx) => {
+    html = html.replace(`__CODE_BLOCK_${idx}__`, code);
+  });
+  return html;
+}
+
+function setAnalysisLinks(query) {
+  const q = encodeURIComponent(query || '');
+  analysisGoogleLink.href = `https://www.google.com/search?q=${q}`;
+  analysisBingLink.href = `https://www.bing.com/search?q=${q}`;
+  analysisBaiduLink.href = `https://www.baidu.com/s?wd=${q}`;
+}
+
+function getLatestUserMessage(messages) {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i].role === 'user' && normalizeMessageText(messages[i].content)) {
+      return messages[i];
+    }
+  }
+  return null;
+}
+
+async function searchForAnalysis(rawQuery, { auto = false } = {}) {
+  const query = normalizeMessageText(rawQuery);
+  if (!query) return;
+  analysisQueryInput.value = query;
+  setAnalysisLinks(query);
+  analysisSearchBtn.disabled = true;
+  analysisSource.textContent = auto ? '自动分析中...' : '搜索中...';
+
+  try {
+    const res = await fetch(`/api/admin/search?q=${encodeURIComponent(query)}`, {
+      headers: { 'X-Admin-Token': adminToken }
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '搜索失败');
+
+    const results = Array.isArray(data.results) ? data.results : [];
+    analysisResults.innerHTML = '';
+    if (!results.length) {
+      analysisResults.innerHTML = '<div class="analysis-empty">未返回可解析结果，可点击上方搜索引擎链接继续分析。</div>';
+    } else {
+      results.forEach((item) => {
+        const row = document.createElement('div');
+        row.className = 'analysis-result-item';
+        row.innerHTML = `
+          <a href="${escapeHtml(item.url || '#')}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title || item.url || '未命名结果')}</a>
+          <div class="analysis-result-snippet">${escapeHtml(item.snippet || '无摘要')}</div>
+        `;
+        analysisResults.appendChild(row);
+      });
+    }
+    analysisSource.textContent = `结果 ${results.length} 条`;
+  } catch (err) {
+    analysisResults.innerHTML = `<div class="analysis-empty">${escapeHtml(err.message || '搜索失败，请稍后重试')}</div>`;
+    analysisSource.textContent = '搜索失败';
+  } finally {
+    analysisSearchBtn.disabled = false;
+  }
+}
+
 function authenticate() {
   socket.emit('admin:auth', { token: adminToken }, (res) => {
     if (!res.success) {
@@ -50,6 +193,7 @@ function authenticate() {
 
 socket.on('connect', authenticate);
 loadApiKeys();
+setAnalysisLinks('');
 
 adminLogoutBtn.addEventListener('click', async () => {
   await fetch('/api/logout', {
@@ -145,6 +289,7 @@ socket.on('admin:new_message', ({ sessionId, message, sessions: list, pendingCou
     pendingReplyToId = message.id;
     replyArea.classList.remove('hidden');
     replyInput.focus();
+    searchForAnalysis(message.content, { auto: true });
 
     if (Notification.permission === 'granted') {
       new Notification('新消息', { body: message.content.substring(0, 100) });
@@ -161,7 +306,7 @@ socket.on('admin:reply_sent', ({ sessions: list, pendingCount }) => {
 });
 
 socket.on('admin:session_data', ({ session, messages }) => {
-  currentSessionName.textContent = session.name;
+  currentSessionName.textContent = session?.name || '未命名会话';
   adminActions.classList.remove('hidden');
   replyArea.classList.remove('hidden');
 
@@ -170,6 +315,10 @@ socket.on('admin:session_data', ({ session, messages }) => {
 
   const pending = messages.filter(m => m.role === 'user' && m.status === 'pending');
   pendingReplyToId = pending.length > 0 ? pending[pending.length - 1].id : null;
+  const latestUserMessage = getLatestUserMessage(messages);
+  if (latestUserMessage) {
+    searchForAnalysis(latestUserMessage.content, { auto: true });
+  }
 
   adminMessages.scrollTop = adminMessages.scrollHeight;
 });
@@ -223,7 +372,7 @@ function appendAdminMessage(msg) {
 
   div.innerHTML = `
     ${modeBadges.length ? `<div class="admin-msg-modes">${modeBadges.join('')}</div>` : ''}
-    <div class="admin-msg-bubble">${escapeHtml(msg.content)}</div>
+    <div class="admin-msg-bubble">${renderWithStructuredBlocks(msg.content)}</div>
     <div class="admin-msg-meta">${msg.role === 'user' ? '用户' : 'AI（你）'} · ${time}${statusLabel}</div>
   `;
 
@@ -232,8 +381,9 @@ function appendAdminMessage(msg) {
 }
 
 function sendReply() {
-  const content = replyInput.value.trim();
-  if (!content || !currentSessionId) return;
+  const content = normalizeMessageText(replyInput.value);
+  const allowByBlock = deepThinkReplyToggle.checked || webSearchReplyToggle.checked;
+  if ((!content && !allowByBlock) || !currentSessionId) return;
 
   replyBtn.disabled = true;
 
@@ -242,14 +392,30 @@ function sendReply() {
     content,
     replyToId: pendingReplyToId,
     simulateTyping: simulateTyping.checked,
-    typingDelay: parseInt(typingDelay.value) || 1500
+    typingDelay: parseInt(typingDelay.value, 10) || 1500,
+    useDeepThink: deepThinkReplyToggle.checked,
+    deepThinkText: deepThinkReplyInput.value,
+    useWebSearch: webSearchReplyToggle.checked,
+    webSearchText: webSearchReplyInput.value
   });
 
   replyInput.value = '';
+  deepThinkReplyInput.value = '';
+  webSearchReplyInput.value = '';
+  deepThinkReplyToggle.checked = false;
+  webSearchReplyToggle.checked = false;
+  deepThinkReplyInput.classList.add('hidden');
+  webSearchReplyInput.classList.add('hidden');
   pendingReplyToId = null;
-  replyBtn.disabled = true;
+  updateReplyBtnState();
 
-  setTimeout(() => { replyBtn.disabled = !replyInput.value.trim(); }, 500);
+  setTimeout(updateReplyBtnState, 500);
+}
+
+function updateReplyBtnState() {
+  const hasContent = !!normalizeMessageText(replyInput.value);
+  const hasBlock = deepThinkReplyToggle.checked || webSearchReplyToggle.checked;
+  replyBtn.disabled = !(hasContent || hasBlock);
 }
 
 function updatePendingBadge(count) {
@@ -278,7 +444,7 @@ function formatTime(timestamp) {
 
 function escapeHtml(text) {
   const div = document.createElement('div');
-  div.textContent = text;
+  div.textContent = text == null ? '' : String(text);
   return div.innerHTML;
 }
 
@@ -298,7 +464,7 @@ function playNotificationSound() {
 }
 
 replyInput.addEventListener('input', () => {
-  replyBtn.disabled = !replyInput.value.trim();
+  updateReplyBtnState();
 });
 
 replyInput.addEventListener('keydown', (e) => {
@@ -313,9 +479,29 @@ replyBtn.addEventListener('click', sendReply);
 document.querySelectorAll('.quick-reply-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     replyInput.value = btn.dataset.text;
-    replyBtn.disabled = false;
+    updateReplyBtnState();
     replyInput.focus();
   });
+});
+
+deepThinkReplyToggle.addEventListener('change', () => {
+  deepThinkReplyInput.classList.toggle('hidden', !deepThinkReplyToggle.checked);
+  if (deepThinkReplyToggle.checked) deepThinkReplyInput.focus();
+  updateReplyBtnState();
+});
+
+webSearchReplyToggle.addEventListener('change', () => {
+  webSearchReplyInput.classList.toggle('hidden', !webSearchReplyToggle.checked);
+  if (webSearchReplyToggle.checked) webSearchReplyInput.focus();
+  updateReplyBtnState();
+});
+
+analysisSearchBtn.addEventListener('click', () => searchForAnalysis(analysisQueryInput.value));
+analysisQueryInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    searchForAnalysis(analysisQueryInput.value);
+  }
 });
 
 document.getElementById('renameBtn').addEventListener('click', () => {
@@ -348,3 +534,5 @@ document.getElementById('deleteBtn').addEventListener('click', () => {
 if ('Notification' in window && Notification.permission === 'default') {
   Notification.requestPermission();
 }
+
+updateReplyBtnState();

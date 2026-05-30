@@ -39,6 +39,14 @@ const messageModes = {
 };
 const avatarStorageKey = `userAvatar:${authUser.id || authUser.username}`;
 
+function normalizeMessageText(value) {
+  if (typeof value !== 'string') return '';
+  return value
+    .replace(/\u00A0/g, ' ')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim();
+}
+
 userName.textContent = authUser.displayName || authUser.username;
 updateUserAvatar();
 
@@ -241,7 +249,7 @@ function appendMessage(role, content, animate = true, options = null) {
 
   const contentEl = document.createElement('div');
   contentEl.className = 'message-content';
-  contentEl.innerHTML = formatContent(content);
+  contentEl.innerHTML = renderWithStructuredBlocks(content);
 
   if (role === 'user' && options && (options.deepThink || options.webSearch)) {
     const modeBar = document.createElement('div');
@@ -309,13 +317,13 @@ function streamMessage(content, speed) {
   function tick() {
     if (i < plain.length) {
       const chunk = plain.slice(0, i + 1);
-      contentEl.innerHTML = formatContent(chunk);
+      contentEl.innerHTML = renderWithStructuredBlocks(chunk);
       contentEl.appendChild(cursor);
       i += Math.random() > 0.7 ? 2 : 1;
       scrollToBottom();
       setTimeout(tick, speed + Math.random() * 15);
     } else {
-      contentEl.innerHTML = formatContent(content);
+      contentEl.innerHTML = renderWithStructuredBlocks(content);
       const actions = document.createElement('div');
       actions.className = 'message-actions';
       actions.innerHTML = `
@@ -366,23 +374,79 @@ function removeTypingIndicator() {
   }
 }
 
-function formatContent(text) {
-  let html = escapeHtml(text);
-  html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => `<pre><code>${code.trim()}</code></pre>`);
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+function renderWithStructuredBlocks(text) {
+  const source = String(text || '');
+  const tokenMap = {};
+  let tokenIndex = 0;
+
+  const converted = source.replace(/\[(DEEP_THINK|WEB_SEARCH)\]\n?([\s\S]*?)\[\/\1\]/g, (_, type, body) => {
+    const token = `__BLOCK_TOKEN_${tokenIndex++}__`;
+    const blockTitle = type === 'DEEP_THINK' ? '深度思考' : '联网搜索';
+    const blockClass = type === 'DEEP_THINK' ? 'deep-think' : 'web-search';
+    tokenMap[token] = `
+      <div class="assistant-structured-block ${blockClass}">
+        <div class="assistant-structured-title">${blockTitle}</div>
+        <div class="assistant-structured-body">${renderMarkdown(body)}</div>
+      </div>
+    `;
+    return token;
+  });
+
+  let html = renderMarkdown(converted);
+  Object.entries(tokenMap).forEach(([token, blockHtml]) => {
+    html = html.replace(token, blockHtml);
+  });
+  return html;
+}
+
+function renderMarkdown(text) {
+  let html = escapeHtml(String(text || ''));
+  const codeBlocks = [];
+
+  html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+    const token = `__CODE_BLOCK_${codeBlocks.length}__`;
+    const className = lang ? ` class="language-${lang}"` : '';
+    codeBlocks.push(`<pre><code${className}>${code.trim()}</code></pre>`);
+    return token;
+  });
+
+  html = html.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  html = html.replace(/^\> (.+)$/gm, '<blockquote>$1</blockquote>');
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-  const paragraphs = html.split('\n\n');
-  html = paragraphs.map(p => {
-    if (p.startsWith('<pre>')) return p;
-    return `<p>${p.split('\n').join('<br>')}</p>`;
-  }).join('');
+
+  html = html.replace(/(?:^|\n)([-*] .+(?:\n[-*] .+)*)/g, (match) => {
+    const items = match.trim().split('\n').map(line => `<li>${line.replace(/^[-*]\s+/, '')}</li>`).join('');
+    return `\n<ul>${items}</ul>`;
+  });
+
+  html = html.replace(/(?:^|\n)(\d+\. .+(?:\n\d+\. .+)*)/g, (match) => {
+    const items = match.trim().split('\n').map(line => `<li>${line.replace(/^\d+\.\s+/, '')}</li>`).join('');
+    return `\n<ol>${items}</ol>`;
+  });
+
+  const paragraphs = html.split(/\n{2,}/).map(block => {
+    const trimmed = block.trim();
+    if (!trimmed) return '';
+    if (/^<(h1|h2|h3|ul|ol|pre|blockquote|div)/.test(trimmed)) return trimmed;
+    return `<p>${trimmed.replace(/\n/g, '<br>')}</p>`;
+  });
+
+  html = paragraphs.filter(Boolean).join('');
+  codeBlocks.forEach((code, idx) => {
+    html = html.replace(`__CODE_BLOCK_${idx}__`, code);
+  });
+
   return html;
 }
 
 function escapeHtml(text) {
   const div = document.createElement('div');
-  div.textContent = text;
+  div.textContent = text == null ? '' : String(text);
   return div.innerHTML;
 }
 
@@ -391,7 +455,7 @@ function scrollToBottom() {
 }
 
 function sendMessage() {
-  const content = messageInput.value.trim();
+  const content = normalizeMessageText(messageInput.value);
   if (!content || isStreaming) return;
   const options = { ...messageModes };
   socket.emit('user:message', { content, options });
@@ -403,7 +467,7 @@ function sendMessage() {
 }
 
 function updateSendBtn() {
-  const hasText = !!messageInput.value.trim();
+  const hasText = !!normalizeMessageText(messageInput.value);
   sendBtn.disabled = !hasText || isStreaming;
   sendBtn.classList.toggle('active', hasText && !isStreaming);
 }

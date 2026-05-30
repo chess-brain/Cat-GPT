@@ -50,35 +50,72 @@
         <div class="api-key-list" id="apiKeyList"></div>
       </div>
 
-      <div class="admin-messages" id="adminMessages">
-        <div class="empty-state">
-          <div class="empty-state-icon">💬</div>
-          <p>从左侧选择一个会话开始回复</p>
-        </div>
-      </div>
+      <div class="admin-workspace">
+        <div class="admin-chat-column">
+          <div class="admin-messages" id="adminMessages">
+            <div class="empty-state">
+              <div class="empty-state-icon">💬</div>
+              <p>从左侧选择一个会话开始回复</p>
+            </div>
+          </div>
 
-      <div class="admin-reply-area hidden" id="replyArea">
-        <div class="quick-replies" id="quickReplies">
-          <button class="quick-reply-btn" data-text="好的，我来帮您解答这个问题。">好的，我来帮您解答</button>
-          <button class="quick-reply-btn" data-text="这是一个很好的问题！让我详细说明一下：">很好的问题</button>
-          <button class="quick-reply-btn" data-text="感谢您的提问。根据我的了解，">感谢提问</button>
-          <button class="quick-reply-btn" data-text="抱歉，我需要更多信息才能准确回答。您能详细描述一下吗？">需要更多信息</button>
+          <div class="admin-reply-area hidden" id="replyArea">
+            <div class="quick-replies" id="quickReplies">
+              <button class="quick-reply-btn" data-text="好的，我来帮您解答这个问题。">好的，我来帮您解答</button>
+              <button class="quick-reply-btn" data-text="这是一个很好的问题！让我详细说明一下：">很好的问题</button>
+              <button class="quick-reply-btn" data-text="感谢您的提问。根据我的了解，">感谢提问</button>
+              <button class="quick-reply-btn" data-text="抱歉，我需要更多信息才能准确回答。您能详细描述一下吗？">需要更多信息</button>
+            </div>
+            <div class="reply-options">
+              <label>
+                <input type="checkbox" id="simulateTyping" checked>
+                模拟打字延迟
+              </label>
+              <label>
+                延迟
+                <input type="number" id="typingDelay" value="1500" min="0" max="10000" step="500">
+                ms
+              </label>
+              <label>
+                <input type="checkbox" id="deepThinkReplyToggle">
+                添加深度思考块
+              </label>
+              <label>
+                <input type="checkbox" id="webSearchReplyToggle">
+                添加联网搜索块
+              </label>
+            </div>
+            <div class="reply-extensions">
+              <textarea id="deepThinkReplyInput" class="reply-extension-input hidden" rows="2" placeholder="深度思考块内容（可选）..."></textarea>
+              <textarea id="webSearchReplyInput" class="reply-extension-input hidden" rows="2" placeholder="联网搜索块内容（可选）..."></textarea>
+            </div>
+            <div class="reply-box">
+              <textarea id="replyInput" placeholder="输入回复内容（将以 AI 身份发送给用户，支持 Markdown）..." rows="3"></textarea>
+              <button id="replyBtn" disabled>发送回复</button>
+            </div>
+          </div>
         </div>
-        <div class="reply-options">
-          <label>
-            <input type="checkbox" id="simulateTyping" checked>
-            模拟打字延迟
-          </label>
-          <label>
-            延迟
-            <input type="number" id="typingDelay" value="1500" min="0" max="10000" step="500">
-            ms
-          </label>
-        </div>
-        <div class="reply-box">
-          <textarea id="replyInput" placeholder="输入回复内容（将以 AI 身份发送给用户）..." rows="3"></textarea>
-          <button id="replyBtn" disabled>发送回复</button>
-        </div>
+
+        <aside class="analysis-panel">
+          <div class="analysis-header">
+            <strong>右侧分析区</strong>
+            <span id="analysisSource">搜索结果</span>
+          </div>
+          <div class="analysis-search-row">
+            <input id="analysisQueryInput" type="text" placeholder="输入要搜索的问题">
+            <button id="analysisSearchBtn" type="button">搜索</button>
+          </div>
+          <div class="analysis-links">
+            <a id="analysisGoogleLink" href="#" target="_blank" rel="noopener noreferrer">Google</a>
+            <a id="analysisBingLink" href="#" target="_blank" rel="noopener noreferrer">Bing</a>
+            <a id="analysisBaiduLink" href="#" target="_blank" rel="noopener noreferrer">百度</a>
+          </div>
+          <div class="analysis-results" id="analysisResults">
+            <div class="empty-state">
+              <p>选择会话后，将基于用户消息在这里展示搜索结果。</p>
+            </div>
+          </div>
+        </aside>
       </div>
     </main>
   </div>

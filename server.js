@@ -23,6 +23,66 @@ const adminSockets = new Set();
 const sessionSockets = new Map();
 const adminTokens = new Map();
 
+function normalizeMessageText(value) {
+  if (typeof value !== 'string') return '';
+  return value
+    .replace(/\u00A0/g, ' ')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim();
+}
+
+function decodeHtmlEntities(text) {
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
+function stripHtml(input) {
+  return decodeHtmlEntities(input.replace(/<[^>]+>/g, '')).trim();
+}
+
+function extractDuckDuckGoResults(html) {
+  const blocks = html.match(/<div class="result__body">[\s\S]*?<\/div>\s*<\/div>/g) || [];
+  const results = [];
+  for (const block of blocks) {
+    const titleMatch = block.match(/<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/);
+    if (!titleMatch) continue;
+    const snippetMatch = block.match(/<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/);
+    let url = titleMatch[1];
+    const uddg = url.match(/[?&]uddg=([^&]+)/);
+    if (uddg) {
+      try { url = decodeURIComponent(uddg[1]); } catch (_) {}
+    }
+    results.push({
+      title: stripHtml(titleMatch[2]),
+      url,
+      snippet: snippetMatch ? stripHtml(snippetMatch[1]) : ''
+    });
+    if (results.length >= 8) break;
+  }
+  return results;
+}
+
+function buildAssistantReplyContent(baseText, blocks = {}) {
+  const base = normalizeMessageText(baseText);
+  const deepThinkText = normalizeMessageText(blocks.deepThinkText || '');
+  const webSearchText = normalizeMessageText(blocks.webSearchText || '');
+  const useDeepThink = !!blocks.useDeepThink;
+  const useWebSearch = !!blocks.useWebSearch;
+
+  const chunks = [base];
+  if (useDeepThink) {
+    chunks.push(`[DEEP_THINK]\n${deepThinkText || '（已启用深度思考，但未填写具体内容）'}\n[/DEEP_THINK]`);
+  }
+  if (useWebSearch) {
+    chunks.push(`[WEB_SEARCH]\n${webSearchText || '（已启用联网搜索，但未填写具体内容）'}\n[/WEB_SEARCH]`);
+  }
+  return chunks.filter(Boolean).join('\n\n');
+}
+
 function getUserFromToken(token) {
   if (!token) return null;
   return store.getTokenUser(token);
@@ -173,6 +233,37 @@ app.get('/api/admin/me', (req, res) => {
   res.json({ user: { username: ADMIN_USERNAME, displayName: '管理员' } });
 });
 
+app.get('/api/admin/search', requireAdmin, async (req, res) => {
+  const query = normalizeMessageText(req.query.q);
+  if (!query) return res.status(400).json({ error: 'q 不能为空' });
+  if (query.length > 200) return res.status(400).json({ error: 'q 过长' });
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 (CatGPT Admin Search)' }
+    });
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      return res.status(502).json({ error: '搜索服务暂不可用' });
+    }
+
+    const html = await response.text();
+    const results = extractDuckDuckGoResults(html);
+    return res.json({ query, results });
+  } catch (err) {
+    clearTimeout(timeout);
+    return res.status(502).json({
+      error: '搜索失败',
+      detail: err?.name === 'AbortError' ? '请求超时' : '网络异常'
+    });
+  }
+});
+
 app.get('/api/admin/api-keys', requireAdmin, (req, res) => {
   res.json({ keys: store.getApiKeys() });
 });
@@ -259,7 +350,7 @@ app.delete('/api/chats/:id', (req, res) => {
 });
 
 app.post('/api/v1/messages', requireApiKey, (req, res) => {
-  const content = req.body.content?.trim();
+  const content = normalizeMessageText(req.body.content);
   if (!content) return res.status(400).json({ error: 'content 不能为空' });
 
   const options = {
@@ -360,13 +451,14 @@ io.on('connection', (socket) => {
 
   socket.on('user:message', ({ content, options }) => {
     const sessionId = socket.sessionId;
-    if (!sessionId || !content?.trim()) return;
+    const normalizedContent = normalizeMessageText(content);
+    if (!sessionId || !normalizedContent) return;
     const normalizedOptions = {
       deepThink: !!options?.deepThink,
       webSearch: !!options?.webSearch
     };
 
-    const msg = store.addMessage(uuidv4(), sessionId, 'user', content.trim(), 'pending');
+    const msg = store.addMessage(uuidv4(), sessionId, 'user', normalizedContent, 'pending');
 
     socket.emit('user:message:sent', {
       id: msg.id,
@@ -415,9 +507,10 @@ io.on('connection', (socket) => {
     io.to(`session:${sessionId}`).emit('user:typing', { typing });
   });
 
-  socket.on('admin:reply', ({ sessionId, content, replyToId, simulateTyping = true, typingDelay = 1500, streamSpeed = 25 }) => {
+  socket.on('admin:reply', ({ sessionId, content, replyToId, simulateTyping = true, typingDelay = 1500, streamSpeed = 25, useDeepThink = false, deepThinkText = '', useWebSearch = false, webSearchText = '' }) => {
     if (socket.role !== 'admin') return;
-    if (!content?.trim()) return;
+    const hasBaseContent = !!normalizeMessageText(content);
+    if (!hasBaseContent && !useDeepThink && !useWebSearch) return;
 
     if (replyToId) {
       store.updateMessageStatus(replyToId, 'answered');
@@ -428,7 +521,12 @@ io.on('connection', (socket) => {
     );
     pendingMessages.forEach(m => store.updateMessageStatus(m.id, 'answered'));
 
-    const fullContent = content.trim();
+    const fullContent = buildAssistantReplyContent(content, {
+      useDeepThink,
+      deepThinkText,
+      useWebSearch,
+      webSearchText
+    });
     const msgId = uuidv4();
 
     const sendReply = () => {
