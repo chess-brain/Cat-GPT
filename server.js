@@ -66,8 +66,18 @@ function sanitizeUser(user) {
   };
 }
 
+function safeTrim(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function getBearerToken(req) {
+  const authHeader = req && req.headers ? req.headers.authorization : '';
+  if (typeof authHeader !== 'string') return '';
+  return authHeader.replace('Bearer ', '');
+}
+
 function getUserFromAuthHeader(req) {
-  return getUserFromToken(req.headers.authorization?.replace('Bearer ', ''));
+  return getUserFromToken(getBearerToken(req));
 }
 
 function requireAdmin(req, res, next) {
@@ -101,23 +111,26 @@ function requireApiKey(req, res, next) {
 
 app.post('/api/register', (req, res) => {
   const { email, username, password, displayName } = req.body;
-  if (!email?.trim() || !username?.trim() || !password) {
+  const emailTrim = safeTrim(email);
+  const usernameTrim = safeTrim(username);
+  const displayNameTrim = safeTrim(displayName);
+  if (!emailTrim || !usernameTrim || !password) {
     return res.status(400).json({ error: '请填写所有必填项' });
   }
   if (password.length < 6) {
     return res.status(400).json({ error: '密码至少 6 位' });
   }
-  if (store.getUserByEmail(email.trim())) {
+  if (store.getUserByEmail(emailTrim)) {
     return res.status(400).json({ error: '该邮箱已被注册' });
   }
-  if (store.getUserByUsername(username.trim())) {
+  if (store.getUserByUsername(usernameTrim)) {
     return res.status(400).json({ error: '该用户名已被占用' });
   }
 
   const salt = createSalt();
   const passwordHash = hashPassword(password, salt);
   const userId = uuidv4();
-  const user = store.createUser(userId, email.trim(), username.trim(), passwordHash, salt, displayName?.trim());
+  const user = store.createUser(userId, emailTrim, usernameTrim, passwordHash, salt, displayNameTrim);
 
   const token = createToken();
   store.createToken(token, userId, Date.now() + TOKEN_TTL);
@@ -127,11 +140,10 @@ app.post('/api/register', (req, res) => {
 
 app.post('/api/login', (req, res) => {
   const { account, password } = req.body;
-  if (!account?.trim() || !password) {
+  const accountTrim = safeTrim(account);
+  if (!accountTrim || !password) {
     return res.status(400).json({ error: '请输入账号和密码' });
   }
-
-  const accountTrim = account.trim();
 
   if (accountTrim === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
     const adminToken = createAdminToken();
@@ -154,7 +166,7 @@ app.post('/api/login', (req, res) => {
 });
 
 app.post('/api/logout', (req, res) => {
-  const token = req.headers.authorization?.replace('Bearer ', '');
+  const token = getBearerToken(req);
   if (token) store.deleteToken(token);
   const adminToken = req.headers['x-admin-token'];
   if (adminToken) adminTokens.delete(adminToken);
@@ -162,7 +174,7 @@ app.post('/api/logout', (req, res) => {
 });
 
 app.get('/api/me', (req, res) => {
-  const user = getUserFromToken(req.headers.authorization?.replace('Bearer ', ''));
+  const user = getUserFromToken(getBearerToken(req));
   if (!user) return res.status(401).json({ error: '未登录' });
   res.json({ user: sanitizeUser(user) });
 });
@@ -178,7 +190,7 @@ app.get('/api/admin/api-keys', requireAdmin, (req, res) => {
 });
 
 app.post('/api/admin/api-keys', requireAdmin, (req, res) => {
-  const name = req.body.name?.trim();
+  const name = safeTrim(req.body.name);
   if (!name) return res.status(400).json({ error: '请输入密钥名称' });
 
   const apiKey = createApiKey();
@@ -198,7 +210,7 @@ app.get('/api/my/api-keys', requireUser, (req, res) => {
 });
 
 app.post('/api/my/api-keys', requireUser, (req, res) => {
-  const name = req.body.name?.trim();
+  const name = safeTrim(req.body.name);
   if (!name) return res.status(400).json({ error: '请输入密钥名称' });
 
   const apiKey = createApiKey();
@@ -238,7 +250,7 @@ app.patch('/api/chats/:id', (req, res) => {
   const user = getUserFromAuthHeader(req);
   if (!user) return res.status(401).json({ error: '未登录' });
 
-  const title = req.body.title?.trim();
+  const title = safeTrim(req.body.title);
   if (!title) return res.status(400).json({ error: '名称不能为空' });
   if (title.length > 60) return res.status(400).json({ error: '名称不能超过 60 个字符' });
 
@@ -259,7 +271,7 @@ app.delete('/api/chats/:id', (req, res) => {
 });
 
 app.post('/api/v1/messages', requireApiKey, (req, res) => {
-  const content = req.body.content?.trim();
+  const content = safeTrim(req.body.content);
   if (!content) return res.status(400).json({ error: 'content 不能为空' });
 
   const options = {
@@ -360,13 +372,14 @@ io.on('connection', (socket) => {
 
   socket.on('user:message', ({ content, options }) => {
     const sessionId = socket.sessionId;
-    if (!sessionId || !content?.trim()) return;
+    const contentTrim = safeTrim(content);
+    if (!sessionId || !contentTrim) return;
     const normalizedOptions = {
-      deepThink: !!options?.deepThink,
-      webSearch: !!options?.webSearch
+      deepThink: !!(options && options.deepThink),
+      webSearch: !!(options && options.webSearch)
     };
 
-    const msg = store.addMessage(uuidv4(), sessionId, 'user', content.trim(), 'pending');
+    const msg = store.addMessage(uuidv4(), sessionId, 'user', contentTrim, 'pending');
 
     socket.emit('user:message:sent', {
       id: msg.id,
@@ -417,7 +430,8 @@ io.on('connection', (socket) => {
 
   socket.on('admin:reply', ({ sessionId, content, replyToId, simulateTyping = true, typingDelay = 1500, streamSpeed = 25 }) => {
     if (socket.role !== 'admin') return;
-    if (!content?.trim()) return;
+    const contentTrim = safeTrim(content);
+    if (!contentTrim) return;
 
     if (replyToId) {
       store.updateMessageStatus(replyToId, 'answered');
@@ -428,7 +442,7 @@ io.on('connection', (socket) => {
     );
     pendingMessages.forEach(m => store.updateMessageStatus(m.id, 'answered'));
 
-    const fullContent = content.trim();
+    const fullContent = contentTrim;
     const msgId = uuidv4();
 
     const sendReply = () => {
