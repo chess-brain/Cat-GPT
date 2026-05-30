@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>控制台 - CatGPT</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/logo.svg">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="admin-app" id="adminApp">
+    <aside class="admin-sidebar">
+      <div class="sidebar-header">
+        <div class="console-brand">
+          <img src="/assets/logo.svg" alt="CatGPT Logo" class="brand-logo">
+          <span>CatGPT</span>
+        </div>
+        <h2>
+          会话列表
+          <span class="pending-badge hidden" id="pendingBadge">0</span>
+        </h2>
+      </div>
+      <div class="session-list" id="sessionList"></div>
+      <div class="console-footer">
+        <span id="adminUserName">管理员</span>
+        <button id="adminLogoutBtn" title="退出登录">退出</button>
+      </div>
+    </aside>
+
+    <main class="admin-main">
+      <div class="admin-topbar" id="adminTopbar">
+        <h3 id="currentSessionName">选择一个会话</h3>
+        <div class="admin-actions hidden" id="adminActions">
+          <button id="renameBtn">重命名</button>
+          <button id="clearBtn">清空消息</button>
+          <button class="danger" id="deleteBtn">删除会话</button>
+        </div>
+      </div>
+      <div class="api-key-panel">
+        <div class="api-key-header">
+          <strong>API Keys</strong>
+          <div class="api-key-create">
+            <input id="apiKeyNameInput" type="text" placeholder="新密钥名称（如 prod-bot）">
+            <button id="createApiKeyBtn">创建</button>
+          </div>
+        </div>
+        <div class="api-key-help">
+          调用地址：<code>/api/v1/messages</code>，Header 使用 <code>Authorization: Bearer cat_***</code>
+        </div>
+        <div class="api-key-list" id="apiKeyList"></div>
+      </div>
+
+      <div class="admin-messages" id="adminMessages">
+        <div class="empty-state">
+          <div class="empty-state-icon">💬</div>
+          <p>从左侧选择一个会话开始回复</p>
+        </div>
+      </div>
+
+      <div class="admin-reply-area hidden" id="replyArea">
+        <div class="quick-replies" id="quickReplies">
+          <button class="quick-reply-btn" data-text="好的，我来帮您解答这个问题。">好的，我来帮您解答</button>
+          <button class="quick-reply-btn" data-text="这是一个很好的问题！让我详细说明一下：">很好的问题</button>
+          <button class="quick-reply-btn" data-text="感谢您的提问。根据我的了解，">感谢提问</button>
+          <button class="quick-reply-btn" data-text="抱歉，我需要更多信息才能准确回答。您能详细描述一下吗？">需要更多信息</button>
+        </div>
+        <div class="reply-options">
+          <label>
+            <input type="checkbox" id="simulateTyping" checked>
+            模拟打字延迟
+          </label>
+          <label>
+            延迟
+            <input type="number" id="typingDelay" value="1500" min="0" max="10000" step="500">
+            ms
+          </label>
+        </div>
+        <div class="reply-box">
+          <textarea id="replyInput" placeholder="输入回复内容（将以 AI 身份发送给用户）..." rows="3"></textarea>
+          <button id="replyBtn" disabled>发送回复</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/console.js"></script>
+</body>
+</html>

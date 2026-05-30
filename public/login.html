@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CatGPT</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/logo.svg">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body class="auth-page">
+  <div class="auth-container">
+    <div class="auth-logo">
+      <img src="/assets/logo.svg" alt="CatGPT Logo" class="brand-logo-lg">
+      <span>CatGPT</span>
+    </div>
+
+    <div class="auth-card">
+      <h1 id="authTitle">欢迎回来</h1>
+      <p class="auth-subtitle" id="authSubtitle">登录您的账户以继续</p>
+
+      <form id="authForm">
+        <div class="form-group" id="emailGroup">
+          <label for="email">邮箱地址</label>
+          <input type="email" id="email" placeholder="name@example.com" autocomplete="email">
+        </div>
+        <div class="form-group" id="usernameGroup" style="display:none">
+          <label for="username">用户名</label>
+          <input type="text" id="username" placeholder="设置用户名" autocomplete="username">
+        </div>
+        <div class="form-group">
+          <label for="account" id="accountLabel" style="display:none">邮箱或用户名</label>
+          <input type="text" id="account" placeholder="邮箱或用户名" autocomplete="username" style="display:none">
+          <label for="password">密码</label>
+          <input type="password" id="password" placeholder="输入密码" autocomplete="current-password">
+        </div>
+        <div class="form-group" id="displayNameGroup" style="display:none">
+          <label for="displayName">显示名称（可选）</label>
+          <input type="text" id="displayName" placeholder="您的昵称">
+        </div>
+        <p class="auth-error" id="authError"></p>
+        <button type="submit" class="auth-submit" id="authSubmit">继续</button>
+      </form>
+
+      <p class="auth-switch">
+        <span id="switchText">还没有账户？</span>
+        <a href="#" id="switchMode">创建账户</a>
+      </p>
+    </div>
+
+    <p class="auth-footer">使用 CatGPT 即表示您同意我们的<a href="#">服务条款</a>和<a href="#">隐私政策</a>。</p>
+  </div>
+
+  <script src="/js/login.js"></script>
+</body>
+</html>

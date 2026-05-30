@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>API 中心 - CatGPT</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/logo.svg">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <main class="api-page">
+    <header class="api-page-header">
+      <div class="api-page-title">
+        <img src="/assets/logo.svg" alt="CatGPT Logo" class="brand-logo-lg">
+        <strong>CatGPT API 中心</strong>
+      </div>
+      <a class="api-nav-link" href="/">返回聊天</a>
+    </header>
+
+    <section class="api-card">
+      <h3>接口文档</h3>
+      <p class="api-doc-line"><code>POST /api/v1/messages</code> 发送消息（支持 <code>sessionId</code> / <code>deepThink</code> / <code>webSearch</code>）</p>
+      <p class="api-doc-line"><code>GET /api/v1/messages?sessionId=xxx</code> 拉取消息列表与 pending 状态</p>
+      <p class="api-doc-line">鉴权：<code>Authorization: Bearer cat_***</code> 或 <code>X-API-Key: cat_***</code></p>
+    </section>
+
+    <section class="api-card">
+      <h3>API Key 使用教学</h3>
+      <ol class="api-steps">
+        <li>在本页创建 API Key（只会完整显示一次，请立即保存）。</li>
+        <li>调用 <code>POST /api/v1/messages</code> 发送消息，拿到 <code>sessionId</code>。</li>
+        <li>用 <code>GET /api/v1/messages?sessionId=...</code> 轮询获取回复。</li>
+      </ol>
+      <p class="api-doc-line">建议轮询间隔：1~2 秒。</p>
+    </section>
+
+    <section class="api-card">
+      <h3>快速示例（curl）</h3>
+      <pre class="api-code-block"><code># 1) 发送消息
+curl -X POST "http://47.109.16.253:2333/api/v1/messages" \
+  -H "Authorization: Bearer cat_xxx" \
+  -H "Content-Type: application/json" \
+  -d "{\"content\":\"你好\",\"deepThink\":true,\"webSearch\":false}"
+
+# 返回中拿到 sessionId 后轮询
+curl "http://47.109.16.253:2333/api/v1/messages?sessionId=你的sessionId" \
+  -H "Authorization: Bearer cat_xxx"</code></pre>
+    </section>
+
+    <section class="api-card">
+      <h3>Node.js 示例</h3>
+      <pre class="api-code-block"><code>const API_KEY = "cat_xxx";
+const BASE = "http://47.109.16.253:2333";
+
+async function run() {
+  const send = await fetch(`${BASE}/api/v1/messages`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      content: "请给我一个健身计划",
+      deepThink: true,
+      webSearch: true
+    })
+  });
+  const queued = await send.json();
+  const sessionId = queued.sessionId;
+
+  const timer = setInterval(async () => {
+    const res = await fetch(`${BASE}/api/v1/messages?sessionId=${sessionId}`, {
+      headers: { "Authorization": `Bearer ${API_KEY}` }
+    });
+    const data = await res.json();
+    const last = data.messages[data.messages.length - 1];
+    if (last && last.role === "assistant") {
+      console.log("AI回复:", last.content);
+      clearInterval(timer);
+    }
+  }, 1500);
+}
+run();</code></pre>
+    </section>
+
+    <section class="api-card">
+      <h3>部署配置建议（47.109.16.253:2333）</h3>
+      <pre class="api-code-block"><code># .env
+PORT=2333
+ADMIN_USERNAME=admin114514
+ADMIN_PASSWORD=请修改为强密码</code></pre>
+      <p class="api-doc-line">部署后请放行 2333 端口，并建议使用 Nginx + HTTPS 反向代理。</p>
+    </section>
+
+    <section class="api-card">
+      <h3>API Key 管理</h3>
+      <div class="api-key-form">
+        <input id="apiKeyNameInput" type="text" placeholder="输入密钥名称，例如 prod-service">
+        <button id="createApiKeyBtn" type="button">创建并复制</button>
+      </div>
+      <p class="api-key-note" id="apiKeyStatus">登录用户可管理“我的 API Keys”；未登录也可快速创建。</p>
+      <div class="api-key-list" id="apiKeyList"></div>
+    </section>
+  </main>
+
+  <script src="/js/api-portal.js"></script>
+</body>
+</html>
