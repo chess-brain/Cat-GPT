@@ -33,6 +33,7 @@ let typingEl = null;
 let isStreaming = false;
 let chats = [];
 let pendingReplies = 0;
+let pendingToolHints = [];
 const messageModes = {
   deepThink: false,
   webSearch: false
@@ -85,14 +86,25 @@ async function loadChats() {
 function renderChatHistory() {
   chatHistory.innerHTML = '';
   chats.forEach(chat => {
+    const preview = (chat.last_message || '').trim();
+    const previewText = preview
+      ? `${preview.slice(0, 24)}${preview.length > 24 ? '...' : ''}`
+      : '暂无消息';
+    const timeText = formatChatTime(chat.last_active || chat.created_at || Date.now());
     const item = document.createElement('div');
     item.className = `history-item${chat.id === sessionId ? ' active' : ''}`;
     item.innerHTML = `
       <div class="history-item-main">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
-        </svg>
-        <span>${escapeHtml(chat.title || '新对话')}</span>
+        <div class="history-item-title-row">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+          </svg>
+          <span>${escapeHtml(chat.title || '新对话')}</span>
+        </div>
+        <div class="history-item-meta-row">
+          <span class="history-item-preview">${escapeHtml(previewText)}</span>
+          <span class="history-item-time">${timeText}</span>
+        </div>
       </div>
       <div class="history-item-actions">
         <button class="history-action-btn" data-action="rename" title="重命名">✎</button>
@@ -134,6 +146,7 @@ function switchChat(id) {
   if (id === sessionId) return;
   sessionId = id;
   localStorage.setItem('currentChatId', sessionId);
+  clearPendingToolHints();
   renderChatHistory();
   pendingReplies = 0;
   updateConnectStatus();
@@ -147,6 +160,7 @@ function joinSession(id) {
 }
 
 function clearMessages() {
+  clearPendingToolHints();
   messagesInner.innerHTML = '';
   const welcome = document.createElement('div');
   welcome.className = 'welcome-screen';
@@ -179,6 +193,7 @@ socket.on('user:auth_error', () => {
 
 socket.on('user:history', ({ messages }) => {
   pendingReplies = 0;
+  clearPendingToolHints();
   updateConnectStatus();
   if (messages.length > 0) {
     hideWelcome();
@@ -189,11 +204,16 @@ socket.on('user:history', ({ messages }) => {
 
 socket.on('user:message:sent', (msg) => {
   appendMessage('user', msg.content, true, msg.options);
+  touchChatSession(msg.content);
+  showPendingToolHints(msg.options);
+  updateConnectStatus();
 });
 
 socket.on('user:reply', (msg) => {
   removeTypingIndicator();
   pendingReplies = Math.max(0, pendingReplies - 1);
+  clearPendingToolHints();
+  touchChatSession(msg.content);
   updateConnectStatus();
   if (msg.stream) {
     streamMessage(msg.content, msg.streamSpeed || 25);
@@ -224,6 +244,61 @@ socket.on('user:chat_updated', ({ sessionId: sid, title }) => {
 function hideWelcome() {
   const w = document.getElementById('welcomeScreen');
   if (w) w.remove();
+}
+
+function formatChatTime(timestamp) {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const diff = now - date;
+  if (diff < 60000) return '刚刚';
+  if (date.toDateString() === now.toDateString()) {
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  }
+  return date.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
+}
+
+function touchChatSession(lastMessage) {
+  const index = chats.findIndex(c => c.id === sessionId);
+  if (index < 0) return;
+  const chat = chats[index];
+  chat.last_active = Date.now();
+  chat.last_message = normalizeMessageText(lastMessage || '') || chat.last_message || '';
+  if (index > 0) {
+    chats.splice(index, 1);
+    chats.unshift(chat);
+  }
+  renderChatHistory();
+}
+
+function clearPendingToolHints() {
+  pendingToolHints.forEach(el => el.remove());
+  pendingToolHints = [];
+}
+
+function showPendingToolHints(options) {
+  clearPendingToolHints();
+  const tasks = [];
+  if (options?.deepThink) tasks.push('正在深度思考');
+  if (options?.webSearch) tasks.push('正在联网搜索');
+  if (!tasks.length) return;
+
+  tasks.forEach((text) => {
+    const row = document.createElement('div');
+    row.className = 'message-row assistant tool-hint-row';
+    row.innerHTML = `
+      <div class="message-row-inner">
+        <div class="message-avatar">
+          <svg width="20" height="20" viewBox="0 0 41 41" fill="none"><path d="M37.5 18.5c0-1.5-.5-3-1.5-4.2L30 6.8c-1.2-1.2-2.7-1.8-4.2-1.8s-3 .6-4.2 1.8L3.5 24.1c-1.2 1.2-1.8 2.7-1.8 4.2s.6 3 1.8 4.2l6 6c1.2 1.2 2.7 1.8 4.2 1.8s3-.6 4.2-1.8L37.5 26.9c1.2-1.2 1.8-2.7 1.8-4.2s-.6-3-1.8-4.2z" fill="currentColor"/></svg>
+        </div>
+        <div class="message-body">
+          <div class="tool-hint-pill">${text}<span class="tool-hint-dots"></span></div>
+        </div>
+      </div>
+    `;
+    messagesInner.appendChild(row);
+    pendingToolHints.push(row);
+  });
+  scrollToBottom();
 }
 
 function appendMessage(role, content, animate = true, options = null) {
@@ -412,12 +487,15 @@ function renderMarkdown(text) {
 
   html = html.replace(/`([^`\n]+)`/g, '<code>$1</code>');
   html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  html = html.replace(/(^|[\s(])(https?:\/\/[^\s<]+)/g, '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>');
   html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
   html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
   html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  html = html.replace(/^---$/gm, '<hr>');
   html = html.replace(/^\> (.+)$/gm, '<blockquote>$1</blockquote>');
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  html = html.replace(/~~(.+?)~~/g, '<del>$1</del>');
 
   html = html.replace(/(?:^|\n)([-*] .+(?:\n[-*] .+)*)/g, (match) => {
     const items = match.trim().split('\n').map(line => `<li>${line.replace(/^[-*]\s+/, '')}</li>`).join('');
@@ -432,7 +510,7 @@ function renderMarkdown(text) {
   const paragraphs = html.split(/\n{2,}/).map(block => {
     const trimmed = block.trim();
     if (!trimmed) return '';
-    if (/^<(h1|h2|h3|ul|ol|pre|blockquote|div)/.test(trimmed)) return trimmed;
+    if (/^<(h1|h2|h3|ul|ol|pre|blockquote|div|hr)/.test(trimmed)) return trimmed;
     return `<p>${trimmed.replace(/\n/g, '<br>')}</p>`;
   });
 
@@ -484,6 +562,7 @@ function bindSuggestions() {
 
 function updateConnectStatus() {
   if (pendingReplies > 0) {
+    connectStatus.textContent = pendingReplies > 1 ? `连接中... (${pendingReplies})` : '连接中...';
     connectStatus.classList.remove('hidden');
   } else {
     connectStatus.classList.add('hidden');
